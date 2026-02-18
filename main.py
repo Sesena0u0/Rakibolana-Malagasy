@@ -7,17 +7,32 @@ import argparse
 import os
 import glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
 
 BASE_URL = "https://www.rakibolana.org/rakibolana/alpha/"
 FINAL_CSV_FILE = "rakibolana.csv"
 TEMP_DIR = "temp_csvs"
 MAX_WORKERS = 10
+TIMEOUT = 90
+
+session = requests.Session()
+retry_strategy = Retry(
+    total=5,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET"],
+    raise_on_status=False
+)
+adapter = HTTPAdapter(pool_connections=MAX_WORKERS, pool_maxsize=MAX_WORKERS, max_retries=retry_strategy)
+session.mount("https://", adapter)
+session.mount("http://", adapter)
 
 def get_last_page_number(letter):
     """Finds the last page number for a given letter."""
     url = f"{BASE_URL}{letter}"
     try:
-        response = requests.get(url, timeout=10)
+        response = session.get(url, timeout=TIMEOUT)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         last_page_link = soup.find('a', attrs={'aria-label': 'Farany'})
@@ -54,7 +69,7 @@ def scrape_page_to_temp_file(task):
     url = f"{BASE_URL}{letter}?page={page_number}"
     
     try:
-        response = requests.get(url, timeout=20)
+        response = session.get(url, timeout=TIMEOUT)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"  [ERROR] Failed to download page {page_number} for letter {letter}: {e}")
